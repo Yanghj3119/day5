@@ -1,0 +1,25 @@
+html { scroll-behavior: smooth; }
+.vibe-nav { position: sticky; top: 0; z-index: 10; display: flex; justify-content: space-between; align-items: center; padding: 12px 24px; background: #fff; box-shadow: 0 1px 4px rgba(0,0,0,.1); }
+.vibe-nav ul { display: flex; gap: 16px; list-style: none; margin: 0; padding: 0; flex-wrap: wrap; }
+.vibe-nav a { color: #333; text-decoration: none; font-size: .95rem; }
+.vibe-nav a:hover { color: #ff7a00; }
+.vibe-hero { min-height: 70vh; display: flex; flex-direction: column; justify-content: center; align-items: center; text-align: center; color: #fff; padding: 24px; background: linear-gradient(135deg, #4fb3bf, #2d7fa6 60%, #ff9f43); }
+.vibe-hero h1 { font-size: clamp(2rem, 6vw, 3.5rem); margin: 0 0 12px; }
+.vibe-btn { margin-top: 20px; padding: 12px 28px; border-radius: 999px; background: #fff; color: #2d7fa6; text-decoration: none; font-weight: 700; }
+.vibe-section { max-width: 1000px; margin: 0 auto; padding: 56px 24px; }
+.vibe-section.alt { max-width: none; background: #f6f7f9; }
+.vibe-section.alt > * { max-width: 1000px; margin-left: auto; margin-right: auto; }
+.vibe-section h2 { margin: 0 0 20px; }
+.vibe-facts, .vibe-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(220px, 1fr)); gap: 16px; }
+.vibe-fact, .vibe-card { background: #fff; border-radius: 12px; padding: 18px; box-shadow: 0 1px 4px rgba(0,0,0,.1); display: flex; flex-direction: column; gap: 6px; }
+.vibe-card h3 { margin: 0; }
+.vibe-card p { margin: 0; color: #666; }
+.tag { align-self: flex-start; font-size: .75rem; background: #ff9f43; color: #fff; padding: 2px 8px; border-radius: 999px; }
+.vibe-list { list-style: none; padding: 0; margin: 0; }
+.vibe-list li { display: flex; justify-content: space-between; gap: 16px; padding: 12px 0; border-bottom: 1px solid #eee; }
+.vibe-timeline { padding-left: 20px; }
+.vibe-timeline li { margin-bottom: 14px; }
+.vibe-timeline b { margin-right: 10px; color: #ff7a00; }
+.vibe-gallery { display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 12px; }
+.vibe-gallery div { height: 150px; border-radius: 12px; display: flex; align-items: center; justify-content: center; color: #fff; font-weight: 700; }
+.vibe-footer { text-align: center; padding: 32px 16px; background: #222; color: #ddd; }
