@@ -22,6 +22,13 @@ create table if not exists products (
   created_at  timestamptz not null default now()
 );
 
+-- 예전에 만든 products 테이블이 있어도 필요한 컬럼이 생기도록 보강
+alter table products
+  add column if not exists category    text    not null default '기타',
+  add column if not exists emoji       text    not null default '🍊',
+  add column if not exists description text    not null default '',
+  add column if not exists stock       integer not null default 100;
+
 -- 장바구니
 create table if not exists cart_items (
   id         bigint generated always as identity primary key,
@@ -185,6 +192,20 @@ alter table guestbook      enable row level security;
 alter table comments       enable row level security;
 alter table likes          enable row level security;
 
+-- 다시 실행해도 오류가 나지 않도록 기존 정책을 먼저 제거 (데이터는 유지됨)
+do $$
+declare r record;
+begin
+  for r in
+    select policyname, tablename from pg_policies
+    where schemaname = 'public'
+      and tablename in ('profiles', 'products', 'cart_items', 'orders', 'order_items',
+                        'order_requests', 'guestbook', 'comments', 'likes')
+  loop
+    execute format('drop policy %I on public.%I', r.policyname, r.tablename);
+  end loop;
+end $$;
+
 create policy "profiles read"   on profiles for select using (true);
 create policy "profiles update" on profiles for update using (auth.uid() = id);
 
@@ -215,6 +236,10 @@ create policy "likes delete" on likes for delete using (auth.uid() = user_id);
 
 -- ============ 5. 상품 샘플 데이터 (가격은 예시) ============
 
+-- 이미 상품이 있으면 중복 삽입하지 않음
+do $$
+begin
+if not exists (select 1 from products) then
 insert into products (name, category, price, emoji, description, stock) values
   ('제주 감귤 3kg',        '과일',     15900, '🍊', '새콤달콤 노지 감귤', 200),
   ('한라봉 2kg',           '과일',     24900, '🍊', '당도 높은 프리미엄 한라봉', 150),
@@ -226,3 +251,5 @@ insert into products (name, category, price, emoji, description, stock) values
   ('보리빵 10개입',        '가공식품',  9900, '🍞', '촉촉한 제주 보리빵', 150),
   ('청귤청 500ml',         '가공식품', 12900, '🍯', '차와 에이드로 즐기는 청귤청', 100),
   ('제주 녹차 티백 20입',  '가공식품', 11900, '🍵', '청정 제주 녹차', 100);
+end if;
+end $$;

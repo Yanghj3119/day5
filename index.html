@@ -3,10 +3,266 @@
   <head>
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-    <title>React Starter</title>
+    <title>3D 날씨</title>
+    <style>
+      * { box-sizing: border-box; }
+      html, body { margin: 0; height: 100%; overflow: hidden; font-family: system-ui, 'Malgun Gothic', sans-serif; color: #fff; background: #0b1d2e; }
+      #scene { position: fixed; inset: 0; }
+      .panel { position: fixed; z-index: 1; background: rgba(10, 25, 40, .72); backdrop-filter: blur(6px); border-radius: 14px; padding: 14px 16px; }
+      .top { top: 16px; left: 16px; right: 16px; max-width: 420px; display: flex; flex-direction: column; gap: 10px; }
+      .top h1 { margin: 0; font-size: 1.1rem; }
+      .bar { display: flex; gap: 8px; }
+      select, button { font: inherit; padding: 8px 10px; border-radius: 8px; border: none; }
+      select { flex: 1; }
+      button { background: #4fb3bf; color: #04222b; font-weight: 700; cursor: pointer; }
+      .info { bottom: 16px; left: 16px; right: 16px; max-width: 420px; font-size: .9rem; line-height: 1.6; }
+      .info b { font-size: 1.6rem; }
+      .tag { font-size: .75rem; padding: 2px 8px; border-radius: 999px; background: #2e7d32; }
+      .tag.warn { background: #b26a00; }
+      .hint { opacity: .7; font-size: .75rem; }
+      .err { color: #ffb4b4; }
+    </style>
+    <script type="importmap">
+      {
+        "imports": {
+          "three": "https://cdn.jsdelivr.net/npm/three@0.160.0/build/three.module.js",
+          "three/addons/": "https://cdn.jsdelivr.net/npm/three@0.160.0/examples/jsm/"
+        }
+      }
+    </script>
   </head>
   <body>
-    <div id="root"></div>
-    <script type="module" src="/src/main.jsx"></script>
+    <div id="scene"></div>
+
+    <div class="panel top">
+      <h1>🌤 3D 실시간 날씨</h1>
+      <div class="bar">
+        <select id="city"></select>
+        <button id="reload">새로고침</button>
+      </div>
+    </div>
+    <div class="panel info" id="info">불러오는 중...</div>
+
+    <script type="module">
+      import * as THREE from 'three'
+      import { OrbitControls } from 'three/addons/controls/OrbitControls.js'
+
+      // ---------- 데이터 ----------
+      const CITIES = [
+        ['서귀포시', 52, 33], ['제주시', 52, 38], ['서울', 60, 127], ['인천', 55, 124], ['대전', 67, 100],
+        ['대구', 89, 90], ['광주', 58, 74], ['울산', 102, 84], ['부산', 98, 76], ['강릉', 92, 131],
+      ]
+      const PTY = { 0: '없음', 1: '비', 2: '비/눈', 3: '눈', 5: '빗방울', 6: '빗방울/눈날림', 7: '눈날림' }
+      const DIRS = ['북', '북북동', '북동', '동북동', '동', '동남동', '남동', '남남동', '남', '남남서', '남서', '서남서', '서', '서북서', '북서', '북북서']
+      const windDir = (deg) => DIRS[Math.round(deg / 22.5) % 16]
+      const num = (v) => (Number.isFinite(parseFloat(v)) ? parseFloat(v) : 0)
+
+      const $city = document.getElementById('city')
+      const $info = document.getElementById('info')
+      CITIES.forEach(([n], i) => $city.add(new Option(n, i)))
+
+      // ---------- three.js 기본 ----------
+      const container = document.getElementById('scene')
+      const renderer = new THREE.WebGLRenderer({ antialias: true })
+      renderer.setPixelRatio(Math.min(devicePixelRatio, 2))
+      container.appendChild(renderer.domElement)
+
+      const scene = new THREE.Scene()
+      scene.background = new THREE.Color(0x0b1d2e)
+      scene.fog = new THREE.Fog(0x0b1d2e, 18, 40)
+
+      const camera = new THREE.PerspectiveCamera(50, 1, 0.1, 100)
+      camera.position.set(8, 7, 11)
+
+      const controls = new OrbitControls(camera, renderer.domElement)
+      controls.target.set(0, 1.5, 0)
+      controls.enableDamping = true
+      controls.autoRotate = true
+      controls.autoRotateSpeed = 0.6
+
+      scene.add(new THREE.AmbientLight(0xffffff, 0.6))
+      const sun = new THREE.DirectionalLight(0xffffff, 1.1)
+      sun.position.set(6, 10, 4)
+      scene.add(sun)
+
+      const grid = new THREE.GridHelper(20, 20, 0x3a6b82, 0x1d3b4d)
+      scene.add(grid)
+
+      function resize() {
+        const { clientWidth: w, clientHeight: h } = container
+        renderer.setSize(w, h)
+        camera.aspect = w / h
+        camera.updateProjectionMatrix()
+      }
+      addEventListener('resize', resize)
+      resize()
+
+      // 글자 스프라이트
+      function label(text, color = '#ffffff') {
+        const c = document.createElement('canvas')
+        c.width = 256
+        c.height = 96
+        const g = c.getContext('2d')
+        g.fillStyle = color
+        g.font = 'bold 40px system-ui, Malgun Gothic, sans-serif'
+        g.textAlign = 'center'
+        g.textBaseline = 'middle'
+        g.fillText(text, 128, 48)
+        const sp = new THREE.Sprite(new THREE.SpriteMaterial({ map: new THREE.CanvasTexture(c), transparent: true }))
+        sp.scale.set(2.4, 0.9, 1)
+        return sp
+      }
+
+      // 데이터에 따라 바뀌는 오브젝트를 담는 그룹
+      let dynamic = new THREE.Group()
+      scene.add(dynamic)
+      let particles = null
+      let particleSpeed = 0
+
+      function disposeGroup(g) {
+        g.traverse((o) => {
+          o.geometry?.dispose()
+          if (o.material) {
+            o.material.map?.dispose()
+            o.material.dispose()
+          }
+        })
+      }
+
+      // ---------- 장면 구성 ----------
+      function build(data) {
+        scene.remove(dynamic)
+        disposeGroup(dynamic)
+        dynamic = new THREE.Group()
+        scene.add(dynamic)
+
+        const v = data.values
+        const t = num(v.T1H), h = num(v.REH), rain = num(v.RN1), ws = num(v.WSD), vec = num(v.VEC)
+
+        // 1) 현재 값 막대 4개 (높이는 값을 0~5 범위로 정규화)
+        const bars = [
+          { name: '기온', text: `${t}℃`, height: Math.min(Math.max((t + 10) / 50, 0.03), 1) * 5, color: 0xff7a45 },
+          { name: '습도', text: `${h}%`, height: Math.max(h / 100, 0.03) * 5, color: 0x4fb3bf },
+          { name: '강수', text: `${rain}mm`, height: Math.max(Math.min(rain / 20, 1), 0.03) * 5, color: 0x5b8cff },
+          { name: '풍속', text: `${ws}m/s`, height: Math.max(Math.min(ws / 15, 1), 0.03) * 5, color: 0x6ee7a8 },
+        ]
+        bars.forEach((b, i) => {
+          const x = (i - 1.5) * 2.2
+          const mesh = new THREE.Mesh(
+            new THREE.BoxGeometry(1.4, b.height, 1.4),
+            new THREE.MeshStandardMaterial({ color: b.color, roughness: 0.4 }),
+          )
+          mesh.position.set(x, b.height / 2, 0)
+          dynamic.add(mesh)
+          const val = label(b.text)
+          val.position.set(x, b.height + 0.7, 0)
+          dynamic.add(val)
+          const name = label(b.name, '#9fc5d4')
+          name.position.set(x, -0.5, 1.8)
+          dynamic.add(name)
+        })
+
+        // 2) 풍향 화살표: VEC는 바람이 불어오는 방향이므로 반대로 불어가는 방향을 그린다
+        const rad = ((vec + 180) * Math.PI) / 180
+        const dir = new THREE.Vector3(Math.sin(rad), 0, -Math.cos(rad)).normalize()
+        const arrow = new THREE.ArrowHelper(dir, new THREE.Vector3(0, 0.1, 5), 1.5 + Math.min(ws, 15) * 0.25, 0xffd166, 0.6, 0.4)
+        dynamic.add(arrow)
+        const wl = label(`${windDir(vec)}풍`, '#ffd166')
+        wl.position.set(0, 1.2, 5)
+        dynamic.add(wl)
+
+        // 3) 최근 기록(저장된 DB 데이터): 기온 막대를 뒤쪽에 일렬로
+        const hist = data.history ?? []
+        hist.forEach((r, i) => {
+          const ht = Math.max((num(r.temperature) + 10) / 50, 0.03) * 3
+          const m = new THREE.Mesh(
+            new THREE.BoxGeometry(0.5, ht, 0.5),
+            new THREE.MeshStandardMaterial({ color: 0xff7a45, transparent: true, opacity: 0.45 + (i / Math.max(hist.length, 1)) * 0.5 }),
+          )
+          m.position.set((i - (hist.length - 1) / 2) * 0.8, ht / 2, -4)
+          dynamic.add(m)
+        })
+        if (hist.length) {
+          const hl = label('최근 기온 기록', '#9fc5d4')
+          hl.position.set(0, 3.8, -4)
+          dynamic.add(hl)
+        }
+
+        // 4) 강수 파티클 (비/눈)
+        if (particles) {
+          scene.remove(particles)
+          particles.geometry.dispose()
+          particles.material.dispose()
+          particles = null
+        }
+        const pty = Number(v.PTY)
+        if (pty > 0) {
+          const snow = [3, 7].includes(pty)
+          const count = 900
+          const pos = new Float32Array(count * 3)
+          for (let i = 0; i < count; i++) {
+            pos[i * 3] = (Math.random() - 0.5) * 16
+            pos[i * 3 + 1] = Math.random() * 12
+            pos[i * 3 + 2] = (Math.random() - 0.5) * 16
+          }
+          const geo = new THREE.BufferGeometry()
+          geo.setAttribute('position', new THREE.BufferAttribute(pos, 3))
+          particles = new THREE.Points(
+            geo,
+            new THREE.PointsMaterial({ color: snow ? 0xffffff : 0x7fb2ff, size: snow ? 0.14 : 0.07, transparent: true, opacity: 0.85 }),
+          )
+          particleSpeed = snow ? 0.03 : 0.2
+          scene.add(particles)
+        }
+      }
+
+      function showInfo(data, name) {
+        const v = data.values
+        const d = data.base_date
+        const stamp = `${d.slice(0, 4)}-${d.slice(4, 6)}-${d.slice(6)} ${data.base_time.slice(0, 2)}:00 기준`
+        const db = data.saved
+          ? '<span class="tag">DB 저장됨</span>'
+          : `<span class="tag warn">DB 저장 안 됨</span> <span class="hint">${data.saveError ?? ''}</span>`
+        $info.innerHTML = `
+          <b>${num(v.T1H)}℃</b> ${name} · 강수형태 ${PTY[v.PTY] ?? '-'}<br />
+          습도 ${num(v.REH)}% · 1시간 강수 ${num(v.RN1)}mm · 바람 ${windDir(num(v.VEC))}풍 ${num(v.WSD)}m/s<br />
+          ${db}<br />
+          <span class="hint">${stamp} · 출처: 기상청 · 마우스로 회전/확대</span>`
+      }
+
+      // ---------- 호출 ----------
+      async function load() {
+        const [name, nx, ny] = CITIES[$city.value]
+        $info.textContent = '불러오는 중...'
+        try {
+          const res = await fetch(`/api/weather?nx=${nx}&ny=${ny}&region=${encodeURIComponent(name)}`)
+          const data = await res.json()
+          if (!res.ok) throw new Error(data.error || '요청 실패')
+          build(data)
+          showInfo(data, name)
+        } catch (e) {
+          $info.innerHTML = `<span class="err">${e.message}</span>`
+        }
+      }
+      $city.addEventListener('change', load)
+      document.getElementById('reload').addEventListener('click', load)
+
+      // ---------- 애니메이션 ----------
+      renderer.setAnimationLoop(() => {
+        if (particles) {
+          const p = particles.geometry.attributes.position
+          for (let i = 0; i < p.count; i++) {
+            let y = p.getY(i) - particleSpeed
+            if (y < 0) y = 12
+            p.setY(i, y)
+          }
+          p.needsUpdate = true
+        }
+        controls.update()
+        renderer.render(scene, camera)
+      })
+
+      load()
+    </script>
   </body>
 </html>
